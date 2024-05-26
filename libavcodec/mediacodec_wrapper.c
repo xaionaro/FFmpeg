@@ -174,6 +174,7 @@ struct JNIAMediaCodecFields {
     jmethodID get_name_id;
 
     jmethodID configure_id;
+    jmethodID set_parameters_id;
     jmethodID start_id;
     jmethodID flush_id;
     jmethodID stop_id;
@@ -247,6 +248,9 @@ static const struct FFJniField jni_amediacodec_mapping[] = {
 
         { "android/media/MediaCodec", "setInputSurface", "(Landroid/view/Surface;)V", FF_JNI_METHOD, OFFSET(set_input_surface_id), 0 },
         { "android/media/MediaCodec", "signalEndOfInputStream", "()V", FF_JNI_METHOD, OFFSET(signal_end_of_input_stream_id), 0 },
+#if __ANDROID_API__ >= 26
+        { "android/media/MediaCodec", "setParameters", "(Landroid/media/MediaFormat;)V", FF_JNI_METHOD, OFFSET(set_parameters_id), 1 },
+#endif
 
     { "android/media/MediaCodec$BufferInfo", NULL, NULL, FF_JNI_CLASS, OFFSET(mediainfo_class), 1 },
 
@@ -1411,6 +1415,27 @@ fail:
     return ret;
 }
 
+#if __ANDROID_API__ >= 26
+static int mediacodec_jni_setParameters(FFAMediaCodec *ctx,
+                                    const FFAMediaFormat *format_ctx)
+{
+    int ret = 0;
+    JNIEnv *env = NULL;
+    FFAMediaCodecJni *codec = (FFAMediaCodecJni *)ctx;
+    const FFAMediaFormatJni *format = (FFAMediaFormatJni *)format_ctx;
+
+    JNI_GET_ENV_OR_RETURN(env, codec, AVERROR_EXTERNAL);
+
+    (*env)->CallVoidMethod(env, codec->object, codec->jfields.set_parameters_id, format->object);
+
+    if (ff_jni_exception_check(env, 1, codec) < 0) {
+        ret = AVERROR_EXTERNAL;
+    }
+
+    return ret;
+}
+#endif // __ANDROID_API__ >= 26
+
 static int mediacodec_jni_start(FFAMediaCodec* ctx)
 {
     int ret = 0;
@@ -1821,6 +1846,10 @@ static const FFAMediaCodec media_codec_jni = {
     .getConfigureFlagEncode = mediacodec_jni_getConfigureFlagEncode,
     .cleanOutputBuffers = mediacodec_jni_cleanOutputBuffers,
     .signalEndOfInputStream = mediacodec_jni_signalEndOfInputStream,
+
+#if __ANDROID_API__ >= 26
+    .setParameters = mediacodec_jni_setParameters,
+#endif //__ANDROID_API__ >= 26
 };
 
 typedef struct FFAMediaFormatNdk {
@@ -2178,6 +2207,23 @@ static int mediacodec_ndk_configure(FFAMediaCodec* ctx,
     return 0;
 }
 
+#if __ANDROID_API__ >= 26
+static int mediacodec_ndk_setParameters(FFAMediaCodec *ctx,
+                                    const FFAMediaFormat *format_ctx)
+{
+    FFAMediaCodecNdk *codec = (FFAMediaCodecNdk *)ctx;
+    FFAMediaFormatNdk *format = (FFAMediaFormatNdk *)format_ctx;
+
+    int status = AMediaCodec_setParameters(codec->impl, format->impl);
+    if (status != AMEDIA_OK) {
+        av_log(codec, AV_LOG_ERROR, "codec setParameters failed, %d\n", status);
+        return AVERROR_EXTERNAL;
+    }
+
+    return 0;
+}
+#endif //__ANDROID_API__ >= 26
+
 #define MEDIACODEC_NDK_WRAPPER(method)                                   \
 static int mediacodec_ndk_ ## method(FFAMediaCodec* ctx)                 \
 {                                                                        \
@@ -2396,6 +2442,10 @@ static const FFAMediaCodec media_codec_ndk = {
     .getConfigureFlagEncode = mediacodec_ndk_getConfigureFlagEncode,
     .cleanOutputBuffers = mediacodec_ndk_cleanOutputBuffers,
     .signalEndOfInputStream = mediacodec_ndk_signalEndOfInputStream,
+
+#if __ANDROID_API__ >= 26
+    .setParameters = mediacodec_ndk_setParameters,
+#endif //__ANDROID_API__ >= 26
 };
 
 FFAMediaFormat *ff_AMediaFormat_new(int ndk)
