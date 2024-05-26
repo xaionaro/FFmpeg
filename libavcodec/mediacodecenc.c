@@ -31,15 +31,13 @@
 #include "libavutil/opt.h"
 #include "libavutil/thread.h"
 
-#include "avcodec.h"
-#include "bsf.h"
 #include "codec_internal.h"
 #include "encode.h"
 #include "hwconfig.h"
 #include "jni.h"
 #include "mediacodec.h"
-#include "mediacodec_wrapper.h"
 #include "mediacodecdec_common.h"
+#include "mediacodecenc_ctrl.h"
 #include "profiles.h"
 
 #define INPUT_DEQUEUE_TIMEOUT_US 8000
@@ -118,6 +116,9 @@ static const enum AVPixelFormat avc_pix_fmts[] = {
     AV_PIX_FMT_NV12,
     AV_PIX_FMT_NONE
 };
+
+#include "mediacodecenc.h"
+#include "mediacodecenc_ctrl.h"
 
 static void mediacodec_dump_format(AVCodecContext *avctx,
         FFAMediaFormat *out_format)
@@ -484,6 +485,20 @@ static av_cold int mediacodec_init(AVCodecContext *avctx)
         if (s->bitrate_mode == BITRATE_MODE_CQ && avctx->global_quality > 0)
             ff_AMediaFormat_setInt32(format, "quality", avctx->global_quality);
     }
+
+    if (strlen(s->bitrate_ctrl_socket) != 0) {
+#if __ANDROID_API__ >= 26
+        int error = mediacodecenc_ctrl_init(avctx, format);
+        if (error) {
+            av_log(avctx, AV_LOG_ERROR, "unable to initialize the control socket '%s' for MediaCodec bitrate: errcode:%d, description:'%s'\n", s->bitrate_ctrl_socket, errno, strerror(errno));
+            goto bailout;
+        }
+#else
+        av_log(avctx, AV_LOG_ERROR, "ffmpeg was compiled against Android API version %d, but option -bitrate_ctrl_socket requires version 26\n", __ANDROID_API__);
+        goto bailout;
+#endif //__ANDROID_API__ >= 26
+    }
+
     // frame-rate and i-frame-interval are required to configure codec
     if (avctx->framerate.num >= avctx->framerate.den && avctx->framerate.den > 0) {
         s->fps = avctx->framerate.num / avctx->framerate.den;
@@ -582,6 +597,7 @@ bailout:
     return ret;
 }
 
+<<<<<<< HEAD
 static int mediacodec_get_output_index(AVCodecContext *avctx, ssize_t *index,
                                        FFAMediaCodecBufferInfo *out_info)
 {
@@ -621,6 +637,38 @@ static int mediacodec_get_output_index(AVCodecContext *avctx, ssize_t *index,
 
     return ret ? ret : AVERROR(EAGAIN);
 }
+=======
+#if __ANDROID_API__ >= 26
+static void update_bitrate(AVCodecContext *avctx) {
+    MediaCodecEncContext *s = avctx->priv_data;
+
+    uint64_t bitrate_new = __atomic_load_n(&s->ctrl_ctx.bitrate_next, __ATOMIC_SEQ_CST);
+    if (bitrate_new == s->ctrl_ctx.bitrate_cur) {
+        return;
+    }
+
+    if (bitrate_new < 1) {
+        return;
+    }
+
+    if (bitrate_new > UINT32_MAX) {
+        av_log(avctx, AV_LOG_ERROR, "the requested bitrate %lu overflows a 32bit integer: %lu > %u\n", bitrate_new, bitrate_new, UINT32_MAX);
+        return;
+    }
+
+    av_log(avctx, AV_LOG_DEBUG, "sending a message to update the bitrate through format %p using method %p\n", s->ctrl_ctx.out_format, s->ctrl_ctx.out_format->setInt32);
+
+    ff_AMediaFormat_setInt32(s->ctrl_ctx.out_format, (char *)"video-bitrate", bitrate_new);
+    if (ff_AMediaCodec_setParameters(s->codec, s->ctrl_ctx.out_format)) {
+        av_log(avctx, AV_LOG_ERROR, "unable to set the bitrate to %lu\n", bitrate_new);
+        return;
+    }
+
+    av_log(avctx, AV_LOG_INFO, "changed the bitrate: %lu -> %lu\n", s->ctrl_ctx.bitrate_cur, bitrate_new);
+    __atomic_store_n(&s->ctrl_ctx.bitrate_cur, bitrate_new, __ATOMIC_SEQ_CST);
+}
+#endif //__ANDROID_API__ >= 26
+>>>>>>> 3f3b894fe5 (avcodec/mediacodec: Add support of dynamic bitrate)
 
 static int mediacodec_receive(AVCodecContext *avctx, AVPacket *pkt)
 {
@@ -632,10 +680,16 @@ static int mediacodec_receive(AVCodecContext *avctx, AVPacket *pkt)
     size_t out_size = 0;
     int ret;
     int extradata_size = 0;
+<<<<<<< HEAD
 
     ret = mediacodec_get_output_index(avctx, &index, &out_info);
     if (ret < 0)
         return ret;
+=======
+    int64_t timeout_us = s->eof_sent ? OUTPUT_DEQUEUE_TIMEOUT_US : 0;
+
+    ssize_t index = ff_AMediaCodec_dequeueOutputBuffer(codec, &out_info, timeout_us);
+>>>>>>> 3f3b894fe5 (avcodec/mediacodec: Add support of dynamic bitrate)
 
     if (ff_AMediaCodec_infoTryAgainLater(codec, index))
         return AVERROR(EAGAIN);
@@ -821,6 +875,13 @@ static int mediacodec_encode(AVCodecContext *avctx, AVPacket *pkt)
                 return 0;
         }
 
+#if __ANDROID_API__ >= 26
+        if (strlen(s->bitrate_ctrl_socket) != 0 && s->ctrl_ctx.bitrate_next != s->ctrl_ctx.bitrate_cur) {
+            av_log(avctx, AV_LOG_TRACE, "calling update_bitrate\n");
+            update_bitrate(avctx);
+        }
+#endif //__ANDROID_API__ >= 26
+
         if (ret < 0 && ret != AVERROR(EAGAIN))
             return ret;
 
@@ -948,6 +1009,13 @@ bailout:
 static av_cold int mediacodec_close(AVCodecContext *avctx)
 {
     MediaCodecEncContext *s = avctx->priv_data;
+
+#if __ANDROID_API__ >= 26
+    if (strlen(s->bitrate_ctrl_socket) != 0) {
+        mediacodecenc_ctrl_deinit(avctx);
+    }
+#endif //__ANDROID_API__ >= 26
+
     if (s->codec) {
         ff_AMediaCodec_stop(s->codec);
         ff_AMediaCodec_delete(s->codec);
@@ -1000,6 +1068,8 @@ static const AVCodecHWConfigInternal *const mediacodec_hw_configs[] = {
                     OFFSET(name), AV_OPT_TYPE_STRING, {0}, 0, 0, VE },                                      \
     { "bitrate_mode", "Bitrate control method",                                                             \
                     OFFSET(bitrate_mode), AV_OPT_TYPE_INT, {.i64 = -1}, -1, INT_MAX, VE, .unit = "bitrate_mode" },  \
+    { "bitrate_ctrl_socket", "Enable (and set path to) a control UNIX socket that receives uint64_t big-endian messages that dynamically override the bitrate; the value is given in bits per second.", \
+                    OFFSET(bitrate_ctrl_socket), AV_OPT_TYPE_STRING, {.str = ""}, 0, 0, VE }, \
     { "cq", "Constant quality mode",                                                                                \
                     0, AV_OPT_TYPE_CONST, {.i64 = BITRATE_MODE_CQ}, 0, 0, VE, .unit = "bitrate_mode" },             \
     { "vbr", "Variable bitrate mode",                                                                               \

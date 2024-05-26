@@ -240,6 +240,9 @@ struct FFAMediaCodec {
     int (*setAsyncNotifyCallback)(FFAMediaCodec *codec,
                                   const FFAMediaCodecOnAsyncNotifyCallback *callback,
                                   void *userdata);
+#if __ANDROID_API__ >= 26
+    int (*setParameters)(FFAMediaCodec* codec, const FFAMediaFormat* format);
+#endif //__ANDROID_API__ >= 26
 };
 
 static inline char *ff_AMediaCodec_getName(FFAMediaCodec *codec)
@@ -258,6 +261,14 @@ static inline int ff_AMediaCodec_configure(FFAMediaCodec *codec,
 {
     return codec->configure(codec, format, surface, crypto, flags);
 }
+
+#if __ANDROID_API__ >= 26
+static inline int ff_AMediaCodec_setParameters(FFAMediaCodec *codec,
+                                           const FFAMediaFormat *format)
+{
+    return codec->setParameters(codec, format);
+}
+#endif //__ANDROID_API__ >= 26
 
 static inline int ff_AMediaCodec_start(FFAMediaCodec* codec)
 {
