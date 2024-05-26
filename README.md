@@ -1,5 +1,37 @@
-FFmpeg README
-=============
+# The fork of `ffmpeg`
+
+This fork adds option `-bitrate_ctrl_socket` to MediaCodec encoders, which enables
+the user to change the bitrate on fly.
+
+An example of ffmpeg execution:
+```
+ffmpeg -listen 1 -i rtmp://0.0.0.0:1935/live/myStream -c:v hevc_mediacodec -bitrate_ctrl_socket /run/bitrate.sock -b:v 8M -f rtsp rtsp://127.0.0.1:1935/live/reEncoded
+```
+An example of changing the bitrate to 1 Mbps:
+```
+printf '%016X' 1000000 | xxd -r -p | socat -u STDIN UNIX:/run/bitrate.sock
+```
+
+## Building
+
+```
+cd /tmp
+git clone https://github.com/xaionaro/termux-packages
+cd termux-packages
+./scripts/run-docker.sh ./scripts/setup-android-sdk.sh
+curl https://raw.githubusercontent.com/gouravkhunger/termux-packages/20070/fix-glib/packages/glib/build.sh > packages/glib/build.sh
+./scripts/run-docker.sh env TERMUX_FORCE_BUILD_DEPENDENCIES=true ./build-package.sh glib
+./scripts/run-docker.sh rm -f /data/data/.built-packages/glib
+./scripts/run-docker.sh ./build-package.sh glib
+./scripts/run-docker.sh ./build-package.sh ffmpeg
+ls -ld ../output/ffmpeg*deb
+```
+
+## Merging to the upstream
+
+The patch was suggested here: https://ffmpeg.org/pipermail/ffmpeg-devel/2024-May/328280.html
+
+# Original `README.md`
 
 FFmpeg is a collection of libraries and tools to process multimedia content
 such as audio, video, subtitles and related metadata.
