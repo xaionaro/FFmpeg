@@ -41,6 +41,9 @@ typedef struct mediacodecenc_ctrl_ctx {
     uint64_t bitrate_cur;
     uint64_t bitrate_next;
     FFAMediaFormat *out_format;
+
+    // TODO: delete me
+    void (*out_format_setInt32)(FFAMediaFormat* format, const char* name, int32_t value);
 } MediaCodecEncControlContext;
 
 extern int mediacodecenc_ctrl_init(AVCodecContext *avctx, FFAMediaFormat *format);

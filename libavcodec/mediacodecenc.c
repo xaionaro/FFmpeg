@@ -592,7 +592,7 @@ static av_cold int mediacodec_init(AVCodecContext *avctx)
     ret = mediacodec_generate_extradata(avctx);
 
 bailout:
-    if (format)
+    if (format && strlen(s->bitrate_ctrl_socket) == 0)
         ff_AMediaFormat_delete(format);
     return ret;
 }
@@ -656,9 +656,15 @@ static void update_bitrate(AVCodecContext *avctx) {
         return;
     }
 
-    av_log(avctx, AV_LOG_DEBUG, "sending a message to update the bitrate through format %p using method %p\n", s->ctrl_ctx.out_format, s->ctrl_ctx.out_format->setInt32);
+    av_log(avctx, AV_LOG_DEBUG, "sending a message to update the bitrate through format %p using methods %p and %p\n", s->ctrl_ctx.out_format, s->ctrl_ctx.out_format->setInt32, s->codec->setParameters);
+
+    if (s->ctrl_ctx.out_format->setInt32 == 0) {
+        av_log(avctx, AV_LOG_ERROR, "setInt32 pointer is null; auto-correcting to %p\n", s->ctrl_ctx.out_format_setInt32);
+        s->ctrl_ctx.out_format->setInt32 = s->ctrl_ctx.out_format_setInt32;
+    }
 
     ff_AMediaFormat_setInt32(s->ctrl_ctx.out_format, (char *)"video-bitrate", bitrate_new);
+    av_log(avctx, AV_LOG_TRACE, "calling setParameters(%p, %p)\n", s->codec, s->ctrl_ctx.out_format);
     if (ff_AMediaCodec_setParameters(s->codec, s->ctrl_ctx.out_format)) {
         av_log(avctx, AV_LOG_ERROR, "unable to set the bitrate to %lu\n", bitrate_new);
         return;
