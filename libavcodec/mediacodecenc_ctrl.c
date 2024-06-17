@@ -143,6 +143,8 @@ int mediacodecenc_ctrl_init(AVCodecContext *avctx, FFAMediaFormat *format) {
     s->ctrl_ctx.bitrate_cur = avctx->bit_rate;
     s->ctrl_ctx.bitrate_next = s->ctrl_ctx.bitrate_cur;
     s->ctrl_ctx.out_format = format;
+    s->ctrl_ctx.out_format_setInt32 = format->setInt32;
+    av_log(avctx, AV_LOG_TRACE, "setInt32:%p\n", format->setInt32);
 
     server_sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (server_sock_fd < 0) {
